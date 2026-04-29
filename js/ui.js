@@ -1595,17 +1595,26 @@ ${inner}
     return data.token || data.relay_token || data.id || data.value || '';
   }
 
-  async function _createFileRelayToken(settings) {
+  function _extractRelayDownloadUrl(data) {
+    if (!data || typeof data !== 'object') return '';
+    return data.download_url || '';
+  }
+
+  async function _createFileRelayToken(settings, file) {
     const pageUrl = settings.streamingPageUrl;
     const urls = _relayUrlsFromStreamingPage(pageUrl, 'placeholder');
     const ttl = Number(settings.ttlSeconds) || 600;
+    const mime = file && file.type ? file.type : 'application/octet-stream';
 
     const response = await fetch(urls.tokenUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ ttl_seconds: ttl })
+      body: JSON.stringify({
+        ttl_seconds: ttl,
+        mime
+      })
     });
 
     if (!response.ok) {
@@ -1617,8 +1626,12 @@ ${inner}
     if (!token) {
       throw new Error('Relay token response did not include a token.');
     }
+    const downloadUrl = _extractRelayDownloadUrl(data);
+    if (!downloadUrl) {
+      throw new Error('Relay token response did not include download_url.');
+    }
 
-    return Object.assign({ token }, _relayUrlsFromStreamingPage(pageUrl, token));
+    return Object.assign(_relayUrlsFromStreamingPage(pageUrl, token), { token, downloadUrl });
   }
 
   function _wireFileRelayWebSocket(file, relay) {
@@ -1730,7 +1743,7 @@ ${inner}
       throw new Error('Configure a file streaming page URL in Settings before uploading files.');
     }
 
-    const relay = await _createFileRelayToken(settings);
+    const relay = await _createFileRelayToken(settings, file);
     const streamSession = _wireFileRelayWebSocket(file, relay);
     await streamSession.ready;
 

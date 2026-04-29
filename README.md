@@ -81,11 +81,20 @@ Configure this in Settings under `File Uploads`:
 - `File streaming page URL`: the URL of the relay client/page.
 - `Token TTL seconds`: token lifetime requested from the relay.
 
-The app derives these relay endpoints from the page origin:
+The app derives these relay endpoints from the configured URL, including any path prefix.
 
 - `POST /tokens`
 - `GET /download/{token}`
 - `WS /ws/{token}`
+
+Token creation sends the requested TTL and selected file MIME type:
+
+```json
+{
+  "ttl_seconds": 600,
+  "mime": "image/png"
+}
+```
 
 See `file_streaming_README.md` for the relay protocol.
 

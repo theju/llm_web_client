@@ -28,7 +28,7 @@ Example:
 ```bash
 curl -X POST http://localhost:8000/tokens \
 -H "Content-Type: application/json" \
--d '{"ttl_seconds": 600}'
+-d '{"ttl_seconds": 600, "mime": "image/png"}'
 ```
 
 Notes:

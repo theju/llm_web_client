@@ -628,6 +628,24 @@
     };
   }
 
+  function _attachmentUrl(attachment) {
+    if (!attachment || typeof attachment !== 'object') return '';
+    if (_isDataUrl(attachment.dataUrl)) return attachment.dataUrl;
+    return attachment.fileUrl || '';
+  }
+
+  function _contentWithAttachmentUrl(content, attachment) {
+    const text = content != null ? String(content) : '';
+    const url = _attachmentUrl(attachment);
+    if (!url) return text;
+
+    const filename = attachment.filename || 'uploaded file';
+    const mimeType = attachment.mimeType || 'application/octet-stream';
+    const size = attachment.size != null ? `\nFile size: ${attachment.size} bytes` : '';
+    const fileBlock = `\n\nUploaded file:\nFilename: ${filename}\nMIME type: ${mimeType}${size}\nURL: ${url}`;
+    return text ? `${text}${fileBlock}` : fileBlock.trim();
+  }
+
   function _toModelMessages(dbMessages) {
     const out = [];
     const list = Array.isArray(dbMessages) ? dbMessages : [];
@@ -637,18 +655,19 @@
 
       if (m.role === 'user') {
         const attPart = _attachmentToOpenAIInputPart(m.attachment);
+        const textContent = _contentWithAttachmentUrl(m.content, m.attachment);
         if (attPart) {
           out.push({
             role: 'user',
             content: [
-              { type: 'input_text', text: m.content != null ? String(m.content) : '' },
+              { type: 'input_text', text: textContent },
               attPart
             ]
           });
         } else {
           out.push({
             role: 'user',
-            content: m.content != null ? String(m.content) : ''
+            content: textContent
           });
         }
       } else {
