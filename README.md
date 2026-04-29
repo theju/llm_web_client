@@ -2,6 +2,10 @@
 
 A static browser-based chat client for OpenAI-compatible models with MCP server tools, reusable skills, conversation history, and optional file uploads through a no-storage WebSocket relay.
 
+## Disclaimer
+
+Completely AI-generated code.
+
 ## Features
 
 - Configure multiple OpenAI-compatible models.
