@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>MCP Browser Client MVP</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Bootstrap CSS (via CDN) -->
+  <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
+      crossorigin="anonymous"
+  >
+
+  <!-- Bootstrap Icons -->
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.13.1/font/bootstrap-icons.min.css"
+  >
+
+  <style>
+    body, html {
+      height: 100%;
+    }
+
+    #app-root {
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #main-content {
+      flex: 1;
+      overflow: hidden;
+    }
+
+    #chat-layout {
+      height: 100%;
+      display: flex;
+      flex-direction: row;
+      gap: 0;
+    }
+
+    /* Left conversations pane */
+    #conversations-pane {
+      border-right: 1px solid #dee2e6;
+      background-color: #ffffff;
+      width: 260px;
+      max-width: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #conversations-pane.collapsed {
+      display: none;
+    }
+
+    #conversations-pane-header {
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid #dee2e6;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: #f8f9fa;
+    }
+
+    #conversations-pane-body {
+      padding: 0.5rem 0.75rem;
+      overflow-y: auto;
+      flex: 1 1 auto;
+    }
+
+   #conversations-pane .text-truncate {
+       color: #000;
+   }
+
+   .conversation-item {
+       cursor: pointer;
+   }
+
+    .conversation-item.active {
+      background-color: #e7f1ff;
+    }
+
+    #chat-container {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem;
+      background-color: #f8f9fa;
+    }
+
+    .message {
+      margin-bottom: 0.75rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.5rem;
+      max-width: 100%;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+   .message-user {
+     background-color: #e6feda;
+     color: #000;
+     border: 1px solid #dee2e6;
+   }
+
+  .message-assistant {
+    background-color: #ffffff;
+    border: 1px solid #dee2e6;
+  }
+
+    #chat-input-container {
+      border-top: 1px solid #dee2e6;
+      padding: 0.75rem;
+      background-color: #ffffff;
+    }
+
+    #chat-input {
+      resize: none;
+    }
+
+    .small-label {
+      font-size: 0.8rem;
+      color: #6c757d;
+    }
+
+    .required::after {
+      content: " *";
+      color: #dc3545;
+    }
+
+    .settings-icon-btn {
+      border: none;
+      background: transparent;
+      padding: 0.25rem 0.5rem;
+      cursor: pointer;
+    }
+
+    .settings-icon-btn:hover {
+      background-color: #f1f3f5;
+      border-radius: 0.25rem;
+    }
+
+    /* Right-side MCP pane */
+    #mcp-pane {
+      border-left: 1px solid #dee2e6;
+      background-color: #ffffff;
+      width: 280px;
+      max-width: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #mcp-pane.collapsed {
+      display: none;
+    }
+
+    #mcp-pane-header {
+      padding: 0.5rem 0.75rem;
+      border-bottom: 1px solid #dee2e6;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background-color: #f8f9fa;
+    }
+
+    #mcp-pane-body {
+      padding: 0.5rem 0.75rem;
+      overflow-y: auto;
+      flex: 1 1 auto;
+    }
+
+    .mcp-server-toggle,
+    .mcp-tool-toggle {
+      cursor: pointer;
+    }
+
+    .mcp-server-toggle input,
+    .mcp-tool-toggle input {
+      margin-right: 0.5rem;
+    }
+
+    .mcp-section-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin-bottom: 0.25rem;
+    }
+
+    .mcp-section {
+      margin-bottom: 0.75rem;
+    }
+
+    .badge-small {
+      font-size: 0.7rem;
+    }
+  </style>
+</head>
+<body>
+  <div id="app-root" class="container-fluid">
+    <header class="py-2 border-bottom mb-2">
+      <div class="d-flex justify-content-between align-items-center">
+        <div class="d-flex align-items-center gap-2">
+          <button
+            id="toggle-conversations-pane-btn"
+            type="button"
+            class="btn btn-sm btn-outline-secondary"
+            aria-label="Toggle conversations pane"
+            title="Show/hide conversations"
+          >
+            ☰
+          </button>
+          <div>
+            <h1 class="h4 mb-0">MCP Browser Client</h1>
+            <small class="text-muted">MCP Client</small>
+          </div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <span class="small-label">Active model:</span>
+          <select id="active-model-select" class="form-select form-select-sm" style="width: 260px;">
+            <!-- Populated by JS -->
+          </select>
+          <button
+            id="toggle-mcp-pane-btn"
+            type="button"
+            class="btn btn-sm btn-outline-secondary"
+            aria-label="Toggle MCP pane"
+            title="Show/hide MCP servers and tools"
+          >
+            MCP
+          </button>
+          <button
+            id="open-settings-btn"
+            type="button"
+            class="settings-icon-btn"
+            aria-label="Open settings"
+            title="Open settings"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="currentColor" viewBox="0 0 16 16">
+              <path d="M9.405 1.05c-.413-1.4-2.397-1.4-2.81 0l-.1.34a1.464 1.464 0 0 1-2.105.872l-.31-.17c-1.283-.7-2.686.703-1.987 1.986l.169.311c.446.82.023 1.841-.872 2.105l-.34.1c-1.4.413-1.4 2.397 0 2.81l.34.1a1.464 1.464 0 0 1 .872 2.105l-.17.31c-.7 1.283.704 2.686 1.987 1.987l.311-.169a1.464 1.464 0 0 1 2.105.872l.1.34c.413 1.4 2.397 1.4 2.81 0l.1-.34a1.464 1.464 0 0 1 2.105-.872l.31.17c1.283.7 2.686-.704 1.987-1.987l-.169-.311a1.464 1.464 0 0 1 .872-2.105l.34-.1c1.4-.413 1.4-2.397 0-2.81l-.34-.1a1.464 1.464 0 0 1-.872-2.105l.17-.31c.7-1.283-.704-2.686-1.987-1.987l-.311.169a1.464 1.464 0 0 1-2.105-.872zM8 10.5a2.5 2.5 0 1 1 0-5 2.5 2.5 0 0 1 0 5"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div id="main-content" class="row">
+      <div id="chat-layout" class="col-12 d-flex p-0">
+        <!-- Left conversations pane (visible by default) -->
+        <aside id="conversations-pane">
+          <div id="conversations-pane-header">
+            <span class="fw-semibold small">Conversations</span>
+            <button
+              id="new-conversation-btn"
+              type="button"
+              class="btn btn-sm btn-outline-primary"
+              title="New conversation"
+            >
+              +
+            </button>
+          </div>
+          <div id="conversations-pane-body">
+            <div id="conversation-list" class="list-group list-group-flush small">
+              <!-- Populated by JS -->
+            </div>
+          </div>
+        </aside>
+
+        <!-- Main chat area -->
+        <main class="d-flex flex-column flex-grow-1">
+          <div id="chat-container">
+            <div id="messages">
+              <!-- Messages rendered here -->
+            </div>
+            <div id="chat-input-container">
+              <form id="chat-form">
+
+                <!-- Pending attachment link (centered, above textarea) -->
+                <div id="pending-attachment-row" class="d-none mb-2">
+                  <div class="d-flex justify-content-center">
+                    <div
+                      id="pending-attachment-pill"
+                      class="d-inline-flex align-items-center gap-2 border rounded px-2 py-1 bg-light"
+                      style="max-width: 100%;"
+                    >
+                      <a
+                        id="pending-attachment-link"
+                        href="#"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="text-truncate small"
+                        style="max-width: 520px;"
+                      >
+                        Attachment
+                      </a>
+                      <button
+                        type="button"
+                        id="pending-attachment-delete-btn"
+                        class="btn btn-sm btn-link p-0 text-danger"
+                        title="Remove attachment"
+                        aria-label="Remove attachment"
+                      >
+                        <i class="bi bi-trash"></i>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mb-2">
+                  <textarea
+                    id="chat-input"
+                    class="form-control"
+                    rows="3"
+                    placeholder="Type your message and press Enter (Shift+Enter for newline)..."
+                  ></textarea>
+                </div>
+
+                <div class="d-flex justify-content-between align-items-center">
+                  <div class="small text-muted" id="chat-status">
+                    Ready.
+                  </div>
+                  <div class="d-flex gap-2">
+                      <input id="chat-file-input" type="file" class="d-none">
+                      <button
+                          type="button"
+                          id="upload-file-btn"
+                          class="btn btn-sm btn-outline-secondary"
+                          title="Upload a file"
+                      >
+                          Upload file
+                      </button>
+                    <button type="button" id="clear-chat-btn" class="btn btn-sm btn-outline-secondary">
+                      Clear chat
+                    </button>
+                    <button type="submit" id="send-btn" class="btn btn-sm btn-primary">
+                      Send
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+        </main>
+
+        <!-- Right-side MCP pane -->
+        <aside id="mcp-pane" class="collapsed">
+          <div id="mcp-pane-header">
+            <span class="fw-semibold small">MCP Servers &amp; Tools</span>
+            <button
+              id="collapse-mcp-pane-btn"
+              type="button"
+              class="btn btn-sm btn-outline-secondary"
+              title="Hide MCP pane"
+            >
+              ×
+            </button>
+          </div>
+          <div id="mcp-pane-body">
+            <div class="mcp-section">
+              <div class="mcp-section-title">Servers</div>
+              <div id="mcp-pane-server-list" class="list-group list-group-flush small">
+                <!-- Populated by JS -->
+              </div>
+            </div>
+            <div class="mcp-section">
+              <div class="mcp-section-title d-flex justify-content-between align-items-center">
+                <span>Tools</span>
+                <span id="mcp-tools-count" class="badge bg-secondary badge-small">0</span>
+              </div>
+              <div id="mcp-pane-tool-list" class="list-group list-group-flush small">
+                <!-- Populated by JS -->
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div
+    class="modal fade"
+    id="settings-modal"
+    tabindex="-1"
+    aria-labelledby="settings-modal-label"
+    aria-hidden="true"
+  >
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="settings-modal-label">Settings</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <!-- Tabs -->
+          <ul class="nav nav-tabs mb-3" id="settings-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button
+                class="nav-link active"
+                id="models-tab"
+                data-bs-toggle="tab"
+                data-bs-target="#models-tab-pane"
+                type="button"
+                role="tab"
+                aria-controls="models-tab-pane"
+                aria-selected="true"
+              >
+                Models
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button
+                class="nav-link"
+                id="servers-tab"
+                data-bs-toggle="tab"
+                data-bs-target="#servers-tab-pane"
+                type="button"
+                role="tab"
+                aria-controls="servers-tab-pane"
+                aria-selected="false"
+              >
+                MCP Servers
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button
+                class="nav-link"
+                id="skills-tab"
+                data-bs-toggle="tab"
+                data-bs-target="#skills-tab-pane"
+                type="button"
+                role="tab"
+                aria-controls="skills-tab-pane"
+                aria-selected="false"
+              >
+                Skills
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button
+                class="nav-link"
+                id="file-uploads-tab"
+                data-bs-toggle="tab"
+                data-bs-target="#file-uploads-tab-pane"
+                type="button"
+                role="tab"
+                aria-controls="file-uploads-tab-pane"
+                aria-selected="false"
+              >
+                File Uploads
+              </button>
+            </li>
+          </ul>
+
+          <div class="tab-content" id="settings-tabs-content">
+            <!-- Models tab -->
+            <div
+              class="tab-pane fade show active"
+              id="models-tab-pane"
+              role="tabpanel"
+              aria-labelledby="models-tab"
+              tabindex="0"
+            >
+              <h2 class="h6">Models</h2>
+              <div id="model-list" class="list-group mb-3">
+                <!-- Populated by JS -->
+              </div>
+
+              <h2 class="h6">Add / Edit Model</h2>
+              <form id="model-config-form" class="border rounded p-2">
+                <input type="hidden" id="model-id">
+                <div class="mb-2">
+                  <label for="model-name" class="form-label required">Display Name</label>
+                  <input type="text" class="form-control form-control-sm" id="model-name" placeholder="My OpenAI Model" required>
+                </div>
+                <div class="mb-2">
+                  <label for="model-provider" class="form-label required">Provider</label>
+                  <select id="model-provider" class="form-select form-select-sm" required>
+                    <option value="openai">OpenAI-compatible</option>
+                  </select>
+                </div>
+                <div class="mb-2">
+                  <label for="model-api-key" class="form-label required">API Key</label>
+                  <input type="password" class="form-control form-control-sm" id="model-api-key" autocomplete="off" required>
+                </div>
+                <div class="mb-2">
+                  <label for="model-base-url" class="form-label">Base URL</label>
+                  <input type="url" class="form-control form-control-sm" id="model-base-url" placeholder="Leave empty for provider default">
+                </div>
+                <div class="mb-2">
+                  <label for="model-api-type" class="form-label required">API style</label>
+                  <select id="model-api-type" class="form-select form-select-sm" required>
+                    <option value="responses">Responses API</option>
+                    <option value="chat">Chat Completions API</option>
+                  </select>
+                </div>
+                <div class="mb-2">
+                  <label for="model-model-name" class="form-label required">Model ID</label>
+                  <input type="text" class="form-control form-control-sm" id="model-model-name" placeholder="gpt-4o-mini or llama3.1-8b" required>
+                </div>
+                <div class="mb-2">
+                  <label for="model-temperature" class="form-label">Temperature</label>
+                  <input type="number" step="0.1" min="0" max="2" class="form-control form-control-sm" id="model-temperature" placeholder="e.g. 0.7">
+                </div>
+                <div class="mb-2">
+                  <label for="model-max-tokens" class="form-label">Max tokens</label>
+                  <input type="number" min="1" class="form-control form-control-sm" id="model-max-tokens" placeholder="e.g. 512">
+                </div>
+                <button type="submit" class="btn btn-sm btn-primary w-100">
+                  Save Model
+                </button>
+                <div id="model-config-status" class="form-text mt-1 text-muted"></div>
+              </form>
+            </div>
+
+            <!-- MCP Servers tab -->
+            <div
+              class="tab-pane fade"
+              id="servers-tab-pane"
+              role="tabpanel"
+              aria-labelledby="servers-tab"
+              tabindex="0"
+            >
+              <h2 class="h6">MCP Servers</h2>
+              <div id="mcp-server-list" class="list-group mb-2">
+                <!-- Populated by JS -->
+              </div>
+              <button id="add-mcp-server-btn" class="btn btn-sm btn-outline-primary w-100 mb-3">
+                Add MCP Server
+              </button>
+
+              <h2 class="h6">Add / Edit MCP Server</h2>
+              <form id="mcp-server-form" class="border rounded p-2">
+                <input type="hidden" id="mcp-server-id">
+                <div class="mb-2">
+                  <label for="mcp-server-name" class="form-label required">Name</label>
+                  <input type="text" class="form-control form-control-sm" id="mcp-server-name" required>
+                </div>
+                <div class="mb-2">
+                  <label for="mcp-server-endpoint" class="form-label required">JSON-RPC Endpoint</label>
+                  <input type="url" class="form-control form-control-sm" id="mcp-server-endpoint" placeholder="https://example.com/mcp" required>
+                </div>
+                <div class="mb-2">
+                  <label for="mcp-server-api-key" class="form-label">API Key (optional)</label>
+                  <input type="password" class="form-control form-control-sm" id="mcp-server-api-key" autocomplete="off">
+                </div>
+                <div class="d-flex justify-content-between">
+                  <button type="button" id="test-mcp-server-btn" class="btn btn-sm btn-outline-secondary">
+                    Test
+                  </button>
+                  <div class="d-flex gap-1">
+                    <button type="button" id="reset-mcp-server-form-btn" class="btn btn-sm btn-outline-secondary">
+                      Clear
+                    </button>
+                    <button type="submit" class="btn btn-sm btn-primary">
+                      Save
+                    </button>
+                  </div>
+                </div>
+                <div id="mcp-server-form-status" class="form-text mt-1 text-muted"></div>
+              </form>
+            </div>
+
+            <!-- Skills tab -->
+            <div
+              class="tab-pane fade"
+              id="skills-tab-pane"
+              role="tabpanel"
+              aria-labelledby="skills-tab"
+              tabindex="0"
+            >
+              <h2 class="h6">Skills</h2>
+              <div id="skill-list" class="list-group mb-2">
+                <!-- Populated by JS -->
+              </div>
+              <button id="add-skill-btn" class="btn btn-sm btn-outline-primary w-100 mb-3">
+                Add Skill
+              </button>
+
+              <h2 class="h6">Add / Edit Skill</h2>
+              <form id="skill-form" class="border rounded p-2">
+                <input type="hidden" id="skill-id">
+                <div class="mb-2">
+                  <label for="skill-name" class="form-label required">Name</label>
+                  <input type="text" class="form-control form-control-sm" id="skill-name" required>
+                </div>
+                <div class="mb-2">
+                  <label for="skill-description" class="form-label">Description</label>
+                  <input type="text" class="form-control form-control-sm" id="skill-description" placeholder="When this skill should apply">
+                </div>
+                <div class="mb-2">
+                  <label for="skill-instructions" class="form-label required">Instructions</label>
+                  <textarea class="form-control form-control-sm" id="skill-instructions" rows="6" required></textarea>
+                </div>
+                <div class="form-check mb-2">
+                  <input class="form-check-input" type="checkbox" id="skill-enabled" checked>
+                  <label class="form-check-label" for="skill-enabled">Enabled</label>
+                </div>
+                <div class="d-flex justify-content-between">
+                  <button type="button" id="reset-skill-form-btn" class="btn btn-sm btn-outline-secondary">
+                    Clear
+                  </button>
+                  <button type="submit" class="btn btn-sm btn-primary">
+                    Save Skill
+                  </button>
+                </div>
+                <div id="skill-form-status" class="form-text mt-1 text-muted"></div>
+              </form>
+            </div>
+
+            <!-- File Uploads tab -->
+            <div
+              class="tab-pane fade"
+              id="file-uploads-tab-pane"
+              role="tabpanel"
+              aria-labelledby="file-uploads-tab"
+              tabindex="0"
+            >
+              <h2 class="h6">File Uploads</h2>
+              <form id="file-upload-settings-form" class="border rounded p-2">
+                <div class="mb-2">
+                  <label for="file-upload-page-url" class="form-label">File streaming page URL</label>
+                  <input
+                    type="url"
+                    class="form-control form-control-sm"
+                    id="file-upload-page-url"
+                    placeholder="http://localhost:8000/client/example_client.html"
+                  >
+                  <div class="form-text">
+                    The app derives /tokens, /download/{token}, and /ws/{token} from this page origin.
+                  </div>
+                </div>
+                <div class="mb-2">
+                  <label for="file-upload-ttl" class="form-label">Token TTL seconds</label>
+                  <input type="number" min="1" class="form-control form-control-sm" id="file-upload-ttl" placeholder="600">
+                </div>
+                <button type="submit" class="btn btn-sm btn-primary w-100">
+                  Save File Upload Settings
+                </button>
+                <div id="file-upload-settings-status" class="form-text mt-1 text-muted"></div>
+              </form>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            data-bs-dismiss="modal"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap JS -->
+  <script
+    src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"
+    integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz"
+    crossorigin="anonymous"
+  ></script>
+
+  <!-- Our application scripts (order matters: config -> db -> models -> mcp -> ui/controller) -->
+  <script src="js/config.js"></script>
+  <script src="js/db.js"></script>
+  <script src="js/models/baseModel.js"></script>
+  <script src="js/models/openaiModel.js"></script>
+  <script src="js/mcpTransport.js"></script>
+  <script src="js/mcpClient.js"></script>
+  <script src="js/chatController.js"></script>
+  <script src="js/ui.js"></script>
+</body>
+</html>
