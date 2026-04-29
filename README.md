@@ -72,10 +72,9 @@ Enabled skills are added to the conversation context as system instructions.
 
 ## File Uploads
 
-The upload button supports two modes:
+The upload button uses the configured file streaming relay. The app creates a relay token and streams file bytes over WebSocket only when the generated download URL is requested.
 
-- If no file streaming page URL is configured, files are attached as data URLs.
-- If a file streaming page URL is configured, the app creates a relay token and streams file bytes over WebSocket only when the generated download URL is requested.
+If no file streaming page URL is configured, chat file uploads are blocked until one is added.
 
 Configure this in Settings under `File Uploads`:
 

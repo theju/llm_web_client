@@ -1576,23 +1576,17 @@ ${inner}
     }
   }
 
-  function _readFileAsDataUrl(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
-      reader.onload = () => resolve(String(reader.result || ''));
-      reader.readAsDataURL(file);
-    });
-  }
-
   function _relayUrlsFromStreamingPage(pageUrl, token) {
     const page = new URL(pageUrl, window.location.href);
     const encodedToken = encodeURIComponent(token);
     const wsProtocol = page.protocol === 'https:' ? 'wss:' : 'ws:';
+    const prefix = page.pathname.replace(/\/+$/, '');
+    const path = (suffix) => `${prefix}${suffix}`;
+
     return {
-      tokenUrl: new URL('/tokens', page.origin).toString(),
-      downloadUrl: new URL(`/download/${encodedToken}`, page.origin).toString(),
-      wsUrl: `${wsProtocol}//${page.host}/ws/${encodedToken}`
+      tokenUrl: new URL(path('/tokens'), page.origin).toString(),
+      downloadUrl: new URL(path(`/download/${encodedToken}`), page.origin).toString(),
+      wsUrl: `${wsProtocol}//${page.host}${path(`/ws/${encodedToken}`)}`
     };
   }
 
@@ -1732,7 +1726,9 @@ ${inner}
       ? window.ChatController.getFileUploadSettings()
       : {};
     const pageUrl = (settings.streamingPageUrl || '').trim();
-    if (!pageUrl) return null;
+    if (!pageUrl) {
+      throw new Error('Configure a file streaming page URL in Settings before uploading files.');
+    }
 
     const relay = await _createFileRelayToken(settings);
     const streamSession = _wireFileRelayWebSocket(file, relay);
@@ -1776,26 +1772,14 @@ ${inner}
         if (!file) return;
 
         setSendingState(true);
-        setChatStatus('Preparing file...');
+        setChatStatus('Preparing streaming upload...');
 
         try {
           clearPendingAttachment();
-          const streamingAttachment = await _createStreamingAttachment(file);
-          if (streamingAttachment) {
-            pendingAttachment = streamingAttachment;
-          } else {
-            const dataUrl = await _readFileAsDataUrl(file);
-            pendingAttachment = {
-              kind: 'file',
-              filename: file.name,
-              mimeType: file.type || 'application/octet-stream',
-              size: file.size,
-              dataUrl
-            };
-          }
+          pendingAttachment = await _createStreamingAttachment(file);
 
           renderPendingAttachment();
-          setChatStatus(`Attached: ${file.name}`);
+          setChatStatus(`Streaming attachment ready: ${file.name}`);
         } catch (err) {
           setChatStatus(`File upload failed: ${err && err.message ? err.message : String(err)}`);
         } finally {
