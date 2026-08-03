@@ -100,6 +100,37 @@
     }
 
     /**
+     * Extract all assistant text from a Responses API result.
+     * Reasoning models may emit one or more reasoning items before the
+     * message item, and a message may contain multiple output_text parts.
+     *
+     * @param {Object} data
+     * @returns {string}
+     * @private
+     */
+    _extractResponsesText(data) {
+      const textParts = [];
+      const outputItems = data && Array.isArray(data.output) ? data.output : [];
+
+      for (const outputItem of outputItems) {
+        if (!outputItem || outputItem.type !== 'message' || !Array.isArray(outputItem.content)) {
+          continue;
+        }
+        for (const contentPart of outputItem.content) {
+          if (
+            contentPart &&
+            contentPart.type === 'output_text' &&
+            typeof contentPart.text === 'string'
+          ) {
+            textParts.push(contentPart.text);
+          }
+        }
+      }
+
+      return textParts.join('');
+    }
+
+    /**
      * Send a chat request to the OpenAI-compatible API.
      *
      * @param {ChatMessage[]} messages
@@ -211,19 +242,7 @@
       const data = await response.json();
 
       if (apiType === 'responses') {
-        // Responses API: extract text from output[0].content[0].text or similar
-        let text = '';
-        try {
-          const firstOutput = Array.isArray(data.output) ? data.output[0] : null;
-          const firstContent = firstOutput && Array.isArray(firstOutput.content) ? firstOutput.content[0] : null;
-          if (firstContent && typeof firstContent.text === 'string') {
-            text = firstContent.text;
-          } else if (firstOutput && typeof firstOutput.text === 'string') {
-            text = firstOutput.text;
-          }
-        } catch (e) {
-          // fall back to empty string
-        }
+        const text = this._extractResponsesText(data);
 
         const message = {
           role: 'assistant',
