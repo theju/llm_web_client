@@ -1,285 +1,192 @@
 /**
- * MCP JSON-RPC transport over HTTP for the MCP Browser Client MVP.
- *
- * This module provides a simple HTTP-based transport that can be used by
- * higher-level MCP clients. It assumes:
- *
- * - JSON-RPC 2.0
- * - POST requests to a single endpoint per MCP server
- * - CORS is enabled on the server
- *
- * Usage:
- *   const transport = new MCPHttpTransport({
- *     endpoint: 'https://example.com/mcp',
- *     apiKey: 'optional-api-key'
- *   });
- *
- *   const result = await transport.sendRequest('mcp.tools.list', { });
+ * MCP 2026-07-28 Streamable HTTP transport.
  */
 
 (function () {
-  const { mcp } = window.APP_CONFIG;
-
   let nextId = 1;
 
-  /**
-   * Build a JSON-RPC method name from prefix + method key.
-   * E.g. prefix "mcp" + key "tools.list" => "mcp.tools.list"
-   *
-   * @param {string} methodKey
-   * @param {string} [prefix]
-   * @returns {string}
-   */
-  function buildMethodName(methodKey, prefix = mcp.defaultMethodPrefix) {
-    if (!prefix) return methodKey;
-    // Avoid double dots if methodKey already starts with prefix
-    if (methodKey.startsWith(prefix + '.')) return methodKey;
-    return `${prefix}.${methodKey}`;
+  class MCPError extends Error {
+    constructor(message, details = {}) {
+      super(message);
+      this.name = 'MCPError';
+      this.status = details.status;
+      this.code = details.code;
+      this.data = details.data;
+      this.requestId = details.requestId;
+    }
   }
 
-  /**
-   * Simple HTTP transport for JSON-RPC 2.0.
-   */
+  function utf8ToBase64(value) {
+    const bytes = new TextEncoder().encode(value);
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+
+  function encodeMCPHeaderValue(value) {
+    const text = String(value);
+    const isVisibleAscii = /^[\x20-\x7e]*$/.test(text);
+    const hasOuterWhitespace = text !== text.trim();
+    const resemblesSentinel = text.startsWith('=?base64?') && text.endsWith('?=');
+    if (isVisibleAscii && !hasOuterWhitespace && !resemblesSentinel) return text;
+    return `=?base64?${utf8ToBase64(text)}?=`;
+  }
+
   class MCPHttpTransport {
-    /**
-     * @param {Object} config
-     * @param {string} config.endpoint - Full URL to the JSON-RPC endpoint.
-     * @param {string} [config.apiKey] - Optional API key for Authorization header.
-     * @param {Object} [config.headers] - Additional headers to send with each request.
-     */
     constructor(config = {}) {
-      if (!config.endpoint) {
-        throw new Error('MCPHttpTransport requires an endpoint URL');
-      }
+      if (!config.endpoint) throw new Error('MCPHttpTransport requires an endpoint URL');
+      if (!config.protocolVersion) throw new Error('MCPHttpTransport requires a protocol version');
       this.endpoint = config.endpoint;
+      this.protocolVersion = config.protocolVersion;
       this.apiKey = config.apiKey || null;
       this.extraHeaders = config.headers || {};
     }
 
-    /**
-     * Build headers for the request.
-     * @returns {Object}
-     * @private
-     */
-    _buildHeaders() {
-      const headers = Object.assign(
-        {
-          'Content-Type': 'application/json',
-          // Some MCP servers require that clients explicitly accept both
-          // JSON and event-stream responses.
-          Accept: 'application/json, text/event-stream'
-        },
-        this.extraHeaders
-      );
+    _buildHeaders(method, params, requestHeaders = {}) {
+      const headers = Object.assign({}, this.extraHeaders, requestHeaders, {
+        'Content-Type': 'application/json',
+        Accept: 'application/json, text/event-stream',
+        'MCP-Protocol-Version': this.protocolVersion,
+        'Mcp-Method': method
+      });
 
-      if (this.apiKey) {
-        // Generic Bearer token; servers can interpret as needed.
-        headers.Authorization = `Bearer ${this.apiKey}`;
+      if (method === 'tools/call' || method === 'resources/read' || method === 'prompts/get') {
+        const name = params && (params.name != null ? params.name : params.uri);
+        if (name == null) throw new Error(`${method} requires a name or URI for the Mcp-Name header`);
+        headers['Mcp-Name'] = encodeMCPHeaderValue(name);
       }
-
+      if (this.apiKey) headers.Authorization = `Bearer ${this.apiKey}`;
       return headers;
     }
 
-    /**
-     * Parse a single Server-Sent Events (SSE) event block into an object.
-     * This is a minimal parser that supports "event" and "data" fields.
-     *
-     * @param {string} block
-     * @returns {{ event?: string, data?: string }|null}
-     * @private
-     */
     _parseSseEvent(block) {
-      const lines = block.split(/\r?\n/);
-      let eventName = null;
       const dataLines = [];
-
-      for (const line of lines) {
-        if (!line || line.startsWith(':')) {
-          // comment or empty line inside block
-          continue;
-        }
-        const idx = line.indexOf(':');
-        const field = idx === -1 ? line : line.slice(0, idx);
-        let value = idx === -1 ? '' : line.slice(idx + 1);
+      for (const line of block.split(/\r?\n/)) {
+        if (!line || line.startsWith(':')) continue;
+        const index = line.indexOf(':');
+        const field = index === -1 ? line : line.slice(0, index);
+        let value = index === -1 ? '' : line.slice(index + 1);
         if (value.startsWith(' ')) value = value.slice(1);
-
-        if (field === 'event') {
-          eventName = value;
-        } else if (field === 'data') {
-          dataLines.push(value);
-        }
+        if (field === 'data') dataLines.push(value);
       }
-
-      if (!eventName && dataLines.length === 0) {
-        return null;
-      }
-
-      return {
-        event: eventName || undefined,
-        data: dataLines.join('\n')
-      };
+      return dataLines.length ? dataLines.join('\n') : null;
     }
 
-    /**
-     * Consume a text/event-stream response and resolve with the final JSON-RPC result.
-     *
-     * This implementation assumes the server eventually sends a JSON-RPC response
-     * (or a wrapper) in one of the SSE "data:" fields. It:
-     * - concatenates all data chunks that look like JSON
-     * - tries to parse them as JSON-RPC
-     *
-     * If it cannot find a valid JSON-RPC result, it throws an error.
-     *
-     * @param {Response} response
-     * @returns {Promise<any>}
-     * @private
-     */
-    async _consumeEventStream(response) {
-      const reader = response.body && response.body.getReader
-        ? response.body.getReader()
-        : null;
-
-      if (!reader) {
-        throw new Error('MCP HTTP error: event-stream response has no readable body');
+    _unwrapResponse(data, requestId, status) {
+      if (!data || data.jsonrpc !== '2.0') {
+        throw new MCPError('MCP JSON-RPC error: invalid response', { status, requestId });
       }
+      if (data.id !== requestId) return undefined;
+      if (data.error) {
+        const message = data.error.message || 'Unknown MCP JSON-RPC error';
+        const suffix = data.error.code != null ? ` (code ${data.error.code})` : '';
+        throw new MCPError(`MCP JSON-RPC error${suffix}: ${message}`, {
+          status,
+          code: data.error.code,
+          data: data.error.data,
+          requestId
+        });
+      }
+      if (!Object.prototype.hasOwnProperty.call(data, 'result')) {
+        throw new MCPError('MCP JSON-RPC error: missing result field', { status, requestId });
+      }
+      return data.result;
+    }
+
+    async _consumeEventStream(response, requestId) {
+      const reader = response.body && response.body.getReader ? response.body.getReader() : null;
+      if (!reader) throw new MCPError('MCP HTTP error: event-stream response has no readable body');
 
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
-      let aggregatedJsonText = '';
+      let finalResult;
+      const processBlock = (block) => {
+        const payload = this._parseSseEvent(block);
+        if (!payload) return;
+        let data;
+        try {
+          data = JSON.parse(payload);
+        } catch (_) {
+          throw new MCPError('MCP HTTP error: invalid JSON in event-stream response', {
+            status: response.status,
+            requestId
+          });
+        }
+        // Notifications have no id and are allowed before the final response.
+        if (!Object.prototype.hasOwnProperty.call(data, 'id')) return;
+        const result = this._unwrapResponse(data, requestId, response.status);
+        if (result !== undefined) finalResult = result;
+      };
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-
-        // Split into complete SSE event blocks by double newline
-        const parts = buffer.split(/\r?\n\r?\n/);
-        buffer = parts.pop() || '';
-
-        for (const part of parts) {
-          const evt = this._parseSseEvent(part);
-          if (!evt || !evt.data) continue;
-
-          // Heuristic: accumulate anything that looks like JSON.
-          const trimmed = evt.data.trim();
-          if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-            // Separate multiple JSON chunks with newline to keep them parseable
-            if (aggregatedJsonText) aggregatedJsonText += '\n';
-            aggregatedJsonText += trimmed;
-          }
-        }
+        const blocks = buffer.split(/\r?\n\r?\n/);
+        buffer = blocks.pop() || '';
+        blocks.forEach(processBlock);
       }
-
-      // Try to parse the aggregated JSON text.
-      if (!aggregatedJsonText) {
-        throw new Error('MCP HTTP error: event-stream contained no JSON payload');
+      buffer += decoder.decode();
+      if (buffer.trim()) processBlock(buffer);
+      if (finalResult === undefined) {
+        throw new MCPError('MCP HTTP error: event-stream contained no matching JSON-RPC response', {
+          status: response.status,
+          requestId
+        });
       }
-
-      let data;
-      try {
-        // Some servers may send multiple JSON objects separated by newlines.
-        // Try parsing as a single JSON first; if that fails, try line-by-line.
-        try {
-          data = JSON.parse(aggregatedJsonText);
-        } catch (e) {
-          const candidates = [];
-          for (const line of aggregatedJsonText.split('\n')) {
-            const t = line.trim();
-            if (!t) continue;
-            try {
-              candidates.push(JSON.parse(t));
-            } catch (_) {
-              // ignore non-JSON lines
-            }
-          }
-          if (!candidates.length) {
-            throw e;
-          }
-          // Use the last JSON object as the final JSON-RPC response.
-          data = candidates[candidates.length - 1];
-        }
-      } catch (e) {
-        throw new Error('MCP HTTP error: invalid JSON in event-stream response');
-      }
-
-      if (data.error) {
-        const msg = data.error.message || 'Unknown MCP JSON-RPC error';
-        const code = data.error.code != null ? ` (code ${data.error.code})` : '';
-        throw new Error(`MCP JSON-RPC error${code}: ${msg}`);
-      }
-
-      if (!Object.prototype.hasOwnProperty.call(data, 'result')) {
-        throw new Error('MCP JSON-RPC error: missing result field in event-stream response');
-      }
-
-      return data.result;
+      return finalResult;
     }
 
-    /**
-     * Send a JSON-RPC request.
-     *
-     * @param {string} method - Full JSON-RPC method name (e.g. "mcp.tools.list").
-     * @param {Object} [params] - Parameters object.
-     * @returns {Promise<any>} - Resolves with result or rejects with Error.
-     */
-    async sendRequest(method, params = {}) {
-      const id = nextId++;
-      const payload = {
-        jsonrpc: '2.0',
-        id,
-        method,
-        params
-      };
+    async _readError(response, requestId) {
+      let data = null;
+      try {
+        data = await response.json();
+      } catch (_) {
+        // An intermediary may return an empty or non-JSON error response.
+      }
+      if (data && data.error) {
+        const message = data.error.message || response.statusText || 'Request failed';
+        throw new MCPError(`MCP HTTP error: ${response.status} ${message}`, {
+          status: response.status,
+          code: data.error.code,
+          data: data.error.data,
+          requestId
+        });
+      }
+      throw new MCPError(`MCP HTTP error: ${response.status} ${response.statusText}`.trim(), {
+        status: response.status,
+        requestId
+      });
+    }
 
+    async sendRequest(method, params = {}, options = {}) {
+      const id = nextId++;
+      const payload = { jsonrpc: '2.0', id, method, params };
       const response = await fetch(this.endpoint, {
         method: 'POST',
-        headers: this._buildHeaders(),
-        body: JSON.stringify(payload)
+        headers: this._buildHeaders(method, params, options.headers),
+        body: JSON.stringify(payload),
+        signal: options.signal
       });
+      if (!response.ok) return this._readError(response, id);
 
-      if (!response.ok) {
-        let errorText = `MCP HTTP error: ${response.status} ${response.statusText}`;
-        try {
-          const errJson = await response.json();
-          if (errJson && errJson.error && errJson.error.message) {
-            errorText += ` – ${errJson.error.message}`;
-          }
-        } catch (e) {
-          // ignore JSON parse errors
-        }
-        throw new Error(errorText);
-      }
-
-      const contentType = response.headers.get('Content-Type') || '';
-      const mime = contentType.split(';')[0].trim().toLowerCase();
-
-      if (mime === 'text/event-stream') {
-        // Handle streaming SSE responses and resolve with the final JSON-RPC result.
-        return this._consumeEventStream(response);
-      }
+      const mime = (response.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase();
+      if (mime === 'text/event-stream') return this._consumeEventStream(response, id);
 
       let data;
       try {
         data = await response.json();
-      } catch (e) {
-        throw new Error('MCP HTTP error: invalid JSON response');
+      } catch (_) {
+        throw new MCPError('MCP HTTP error: invalid JSON response', {
+          status: response.status,
+          requestId: id
+        });
       }
-
-      if (data.error) {
-        const msg = data.error.message || 'Unknown MCP JSON-RPC error';
-        const code = data.error.code != null ? ` (code ${data.error.code})` : '';
-        throw new Error(`MCP JSON-RPC error${code}: ${msg}`);
-      }
-
-      if (!Object.prototype.hasOwnProperty.call(data, 'result')) {
-        throw new Error('MCP JSON-RPC error: missing result field');
-      }
-
-      return data.result;
+      return this._unwrapResponse(data, id, response.status);
     }
   }
 
-  // Expose globally
+  window.MCPError = MCPError;
   window.MCPHttpTransport = MCPHttpTransport;
-  window.buildMCPMethodName = buildMethodName;
+  window.encodeMCPHeaderValue = encodeMCPHeaderValue;
 })();

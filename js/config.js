@@ -39,9 +39,14 @@ const APP_CONFIG = {
 
   // MCP JSON-RPC defaults
   mcp: {
-    defaultMethodPrefix: '',
+    protocolVersion: '2026-07-28',
+    clientInfo: {
+      name: 'MCP Browser Client',
+      version: '0.0.1'
+    },
+    clientCapabilities: {},
     methods: {
-      initialize: 'initialize',
+      discover: 'server/discover',
       listTools: 'tools/list',
       callTool: 'tools/call'
     }

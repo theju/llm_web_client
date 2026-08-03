@@ -176,7 +176,7 @@
   }
 
   /**
-   * Test an MCP server by calling initialize() and listTools().
+   * Test an MCP server by discovering it and listing its tools.
    *
    * @param {Object} serverConfig
    * @returns {Promise<{ ok: boolean, info?: any, error?: string }>}
@@ -188,28 +188,13 @@
         apiKey: serverConfig.apiKey || null
       });
 
-      const initResult = await client.initialize({
-        protocolVersion: '2025-11-25',
-        capabilities: {
-          tools: {}
-        },
-        clientInfo: {
-          name: 'MCP Client',
-          version: '0.0.1',
-          websiteUrl: window.location.href
-        }
-      });
-      let toolsResult = null;
-      try {
-        toolsResult = await client.listTools({});
-      } catch (e) {
-        // listTools may not be implemented; treat as non-fatal
-      }
+      const discoverResult = await client.discover();
+      const toolsResult = await client.listTools();
 
       return {
         ok: true,
         info: {
-          initialize: initResult,
+          discover: discoverResult,
           tools: toolsResult
         }
       };

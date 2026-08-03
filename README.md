@@ -11,6 +11,7 @@ Completely AI-generated code.
 - Configure multiple OpenAI-compatible models.
 - Choose `Responses API` or `Chat Completions API` per model.
 - Configure multiple MCP JSON-RPC servers.
+- Connect to tools exposed by MCP Streamable HTTP servers using protocol version `2026-07-28`.
 - Enable or disable MCP servers and individual tools from the side pane.
 - Add reusable skills that are injected as system instructions when enabled.
 - Store conversations and settings in browser IndexedDB.
@@ -58,6 +59,19 @@ Open Settings, add an MCP server, and provide:
 - Optional API key
 
 Use the MCP side pane to toggle servers and tools. Disabled tools stay visible and unchecked, but they are not offered to the model.
+
+### MCP Compatibility
+
+This client intentionally supports only MCP protocol version `2026-07-28` over Streamable HTTP. It does not fall back to handshake-based protocol versions and will reject servers that do not advertise `2026-07-28` and the tools capability through `server/discover`.
+
+The integration currently supports the tools surface only:
+
+- `server/discover`
+- `tools/list`, including pagination and TTL-based in-memory caching
+- `tools/call`, including `Mcp-Method`, `Mcp-Name`, and schema-declared `Mcp-Param-*` headers
+- JSON and request-scoped SSE responses
+
+Prompts, resources, subscriptions, OAuth flows, multi-round-trip input handling, Tasks, and MCP Apps are not implemented. The client advertises no optional client capabilities or extensions.
 
 ## Skills
 
@@ -131,6 +145,7 @@ js/models/openaiModel.js     OpenAI-compatible model adapter
 - Keep `APP_CONFIG.db.version` unchanged unless you intentionally need a browser IndexedDB migration.
 - Browser cache can keep stale JS while developing. Hard refresh after script changes.
 - The app currently uses global browser objects rather than a bundler or module system.
+- Run the MCP protocol tests with `node --test tests/mcp.test.js`.
 
 ## License
 
