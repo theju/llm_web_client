@@ -535,8 +535,22 @@
     }
 
     msg.content = newContent != null ? String(newContent) : '';
+    delete msg.responseState;
     await window.DB.updateMessage(msg);
+    await _invalidateResponseStatesAfter(state.activeConversationId, id);
     return msg;
+  }
+
+  async function _invalidateResponseStatesAfter(conversationId, messageId) {
+    const messages = await window.DB.getMessagesByConversation(conversationId);
+    const index = messages.findIndex((message) => message && message.id === messageId);
+    if (index < 0) return;
+    for (const message of messages.slice(index + 1)) {
+      if (message && message.responseState) {
+        delete message.responseState;
+        await window.DB.updateMessage(message);
+      }
+    }
   }
 
   /**
@@ -559,6 +573,7 @@
       throw new Error('Cannot delete a message from a different conversation');
     }
 
+    await _invalidateResponseStatesAfter(state.activeConversationId, id);
     await window.DB.deleteMessage(id);
   }
 
@@ -656,10 +671,14 @@
           });
         }
       } else {
-        out.push({
+        const modelMessage = {
           role: m.role,
           content: m.content != null ? String(m.content) : ''
-        });
+        };
+        if (m.responseState && typeof m.responseState === 'object') {
+          modelMessage.responseState = m.responseState;
+        }
+        out.push(modelMessage);
       }
     }
 
@@ -803,6 +822,7 @@
 
       // 1) Update message content
       msg.content = newContent != null ? String(newContent) : '';
+      delete msg.responseState;
       await window.DB.updateMessage(msg);
 
       // 2) Delete all messages after it
@@ -834,13 +854,15 @@ Return a JSON object of the following format:
       const firstResponse = await state.modelInstance.sendMessage(history, { apiType });
       const assistantMsg = firstResponse.message;
 
-      await window.DB.addMessage({
+      const firstAssistantRecord = {
         conversationId: state.activeConversationId,
         role: 'assistant',
         content: (assistantMsg && assistantMsg.content) || '',
         createdAt: new Date().toISOString(),
         fromTool: true
-      });
+      };
+      if (firstResponse.responseState) firstAssistantRecord.responseState = firstResponse.responseState;
+      await window.DB.addMessage(firstAssistantRecord);
 
       // Try to parse tool request
       let toolRequest = null;
@@ -896,13 +918,15 @@ Return a JSON object of the following format:
         const secondResponse = await state.modelInstance.sendMessage(history2, { apiType });
         const finalAssistant = secondResponse.message;
 
-        await window.DB.addMessage({
+        const finalAssistantRecord = {
           conversationId: state.activeConversationId,
           role: 'assistant',
           content: finalAssistant.content || '',
           createdAt: new Date().toISOString(),
           fromTool: false
-        });
+        };
+        if (secondResponse.responseState) finalAssistantRecord.responseState = secondResponse.responseState;
+        await window.DB.addMessage(finalAssistantRecord);
       }
 
       const updatedMessages = await window.DB.getMessagesByConversation(state.activeConversationId);
@@ -1015,6 +1039,7 @@ Return a JSON object of the following format:
         createdAt: new Date().toISOString(),
         fromTool: true
       };
+      if (firstResponse.responseState) assistantRecord.responseState = firstResponse.responseState;
       await window.DB.addMessage(assistantRecord);
 
       // 5. If we have a valid tool request, execute it and save result as assistant
@@ -1061,13 +1086,15 @@ Return a JSON object of the following format:
         const secondResponse = await state.modelInstance.sendMessage(history2, { apiType });
 
         const finalAssistant = secondResponse.message;
-        await window.DB.addMessage({
+        const finalAssistantRecord = {
           conversationId: state.activeConversationId,
           role: 'assistant',
           content: finalAssistant.content || '',
           createdAt: new Date().toISOString(),
           fromTool: false
-        });
+        };
+        if (secondResponse.responseState) finalAssistantRecord.responseState = secondResponse.responseState;
+        await window.DB.addMessage(finalAssistantRecord);
       }
 
       const updatedMessages = await window.DB.getMessagesByConversation(state.activeConversationId);

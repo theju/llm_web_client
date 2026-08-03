@@ -50,6 +50,8 @@ Endpoint paths are selected from the model API style:
 - `Responses API` uses `/responses`.
 - `Chat Completions API` uses `/chat/completions`.
 
+Responses API conversations use local, stateless continuation. Requests set `store: false`, and the browser stores returned response output items in IndexedDB so later turns can replay model reasoning context. Encrypted reasoning is used when available; providers that return only reasoning summaries or message output continue at the strongest level they support. This continuation data is local, is never rendered in the transcript, and is removed with its messages.
+
 ## Configure MCP Servers
 
 Open Settings, add an MCP server, and provide:
@@ -121,6 +123,7 @@ The app stores local data in IndexedDB:
 - Skills
 - Conversations
 - Messages
+- Responses API continuation items, including encrypted reasoning when returned by the provider
 - Misc settings
 
 API keys are stored locally in the browser. Do not use this app on an untrusted machine or browser profile.

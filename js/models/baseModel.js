@@ -16,6 +16,7 @@
    * @property {string|Array|Object} content
    * @property {string} [name]       - Optional name (for tools, etc.)
    * @property {Object} [toolCall]   - Provider-specific tool call metadata
+   * @property {Object} [responseState] - Opaque Responses API continuation state.
    */
 
   /**
@@ -121,7 +122,8 @@
         role: m.role,
         content,
         name: m.name,
-        toolCall: m.toolCall
+        toolCall: m.toolCall,
+        responseState: m.responseState
       };
     });
   }

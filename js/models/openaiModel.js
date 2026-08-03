@@ -89,14 +89,110 @@
      * @private
      */
     _toResponsesInput(messages) {
-      return messages.map((m) => {
+      const input = [];
+      for (const m of messages) {
+        const state = m && m.responseState;
+        if (this._isCompatibleResponseState(state)) {
+          if (state.fallbackSummary) {
+            input.push({
+              role: 'assistant',
+              content: `Reasoning summary from the previous turn:\n${state.fallbackSummary}`
+            });
+          }
+          if (Array.isArray(state.output) && state.output.length) {
+            input.push(...state.output);
+            continue;
+          }
+        }
+
         const item = {
           role: m.role,
           content: m.content
         };
+        if (Array.isArray(item.content)) {
+          const unsupported = item.content.find((part) => (
+            part && (part.type === 'input_audio' || part.type === 'input_video')
+          ));
+          if (unsupported) {
+            throw new Error(
+              `${unsupported.type} attachments are not supported by this Responses API integration; ` +
+              'use a text, image, or file attachment instead'
+            );
+          }
+          item.content = item.content.map((part) => {
+            if (!part || part.type !== 'input_file') return part;
+            const normalizedPart = Object.assign({}, part);
+            if (
+              typeof normalizedPart.file_url === 'string' &&
+              normalizedPart.file_url.startsWith('data:')
+            ) {
+              normalizedPart.file_data = normalizedPart.file_url;
+              delete normalizedPart.file_url;
+            }
+            delete normalizedPart.mime_type;
+            return normalizedPart;
+          });
+        }
         if (m.name) item.name = m.name;
-        return item;
-      });
+        input.push(item);
+      }
+      return input;
+    }
+
+    _responsesOrigin(modelName = this.config.model || openAI.defaultModel) {
+      return {
+        endpoint: this._getEndpointUrl('responses'),
+        model: modelName
+      };
+    }
+
+    _isCompatibleResponseState(state) {
+      if (!state || state.version !== 1 || state.apiType !== 'responses') return false;
+      const origin = this._responsesOrigin();
+      return state.endpoint === origin.endpoint && state.model === origin.model;
+    }
+
+    _summaryText(value) {
+      if (typeof value === 'string') return value;
+      if (!Array.isArray(value)) return '';
+      return value
+        .map((part) => {
+          if (typeof part === 'string') return part;
+          return part && typeof part.text === 'string' ? part.text : '';
+        })
+        .filter(Boolean)
+        .join('\n');
+    }
+
+    _buildResponseState(data, modelName) {
+      const output = Array.isArray(data.output) ? data.output : [];
+      const reasoningItems = output.filter((item) => item && item.type === 'reasoning');
+      const hasEncrypted = output.some((item) => (
+        item &&
+        (item.type === 'reasoning' || item.type === 'compaction') &&
+        typeof item.encrypted_content === 'string' &&
+        item.encrypted_content.length > 0
+      ));
+      const hasSummary = reasoningItems.some((item) => (
+        this._summaryText(item.summary) || this._summaryText(item.content)
+      ));
+
+      let fallbackSummary = '';
+      if (!reasoningItems.length) {
+        fallbackSummary = this._summaryText(data.reasoning_summary) ||
+          this._summaryText(data.reasoning && data.reasoning.summary);
+      }
+
+      const origin = this._responsesOrigin(modelName);
+      return {
+        version: 1,
+        apiType: 'responses',
+        endpoint: origin.endpoint,
+        model: origin.model,
+        continuationLevel: hasEncrypted ? 'encrypted' : (hasSummary || fallbackSummary ? 'summary' : 'message'),
+        output,
+        fallbackSummary: fallbackSummary || undefined
+      };
     }
 
     /**
@@ -123,11 +219,18 @@
             typeof contentPart.text === 'string'
           ) {
             textParts.push(contentPart.text);
+          } else if (
+            contentPart &&
+            contentPart.type === 'refusal' &&
+            typeof contentPart.refusal === 'string'
+          ) {
+            textParts.push(contentPart.refusal);
           }
         }
       }
 
-      return textParts.join('');
+      if (textParts.length) return textParts.join('');
+      return data && typeof data.output_text === 'string' ? data.output_text : '';
     }
 
     /**
@@ -161,7 +264,9 @@
         // OpenAI Responses API payload (structured input)
         body = {
           model: modelName,
-          input: this._toResponsesInput(normalizedMessages)
+          input: this._toResponsesInput(normalizedMessages),
+          store: false,
+          include: ['reasoning.encrypted_content']
         };
 
         if (
@@ -242,7 +347,21 @@
       const data = await response.json();
 
       if (apiType === 'responses') {
+        if (data && data.error) {
+          throw new Error(`OpenAI Responses API error: ${data.error.message || 'Unknown error'}`);
+        }
+        if (data && data.status === 'failed') {
+          throw new Error('OpenAI Responses API returned a failed response');
+        }
+        if (data && data.status === 'incomplete') {
+          const reason = data.incomplete_details && data.incomplete_details.reason;
+          throw new Error(`OpenAI Responses API returned an incomplete response${reason ? `: ${reason}` : ''}`);
+        }
         const text = this._extractResponsesText(data);
+        if (!text) {
+          throw new Error('OpenAI Responses API returned no assistant text');
+        }
+        const responseState = this._buildResponseState(data, modelName);
 
         const message = {
           role: 'assistant',
@@ -252,7 +371,8 @@
 
         return {
           message,
-          raw: data
+          raw: data,
+          responseState
         };
       }
 
